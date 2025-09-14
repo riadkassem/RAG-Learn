@@ -166,9 +166,13 @@ def rag_chat(uploaded_videos, question):
     # Query
     result = retrievalQA.invoke({'query': question})
     answer = result['result']
-    sources_text = ""
-    for i, doc in enumerate(result['source_documents']):
-        sources_text += f"Source #{i+1}: {doc.metadata['source']}\n{doc.page_content}\n\n"
+    # Only show sources if the answer is not "I don't know"
+    if answer.strip().lower() == "i don't know":
+        sources_text = ""
+    else:
+        sources_text = ""
+        for i, doc in enumerate(result['source_documents']):
+            sources_text += f"Source #{i+1}: {doc.metadata['source']}\n{doc.page_content}\n\n"
 
     return answer, sources_text
 
