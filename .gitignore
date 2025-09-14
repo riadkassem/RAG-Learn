@@ -7,9 +7,9 @@ __pycache__/
 *.so
 
 ## Custom
-data2/audio/*
-data2/transcripts/*
-data2/videos/*
+data/audio/*
+data/transcripts/*
+data/videos/*
 faiss_index
 .gradio
 
