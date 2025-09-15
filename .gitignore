@@ -10,6 +10,7 @@ __pycache__/
 data/audio/*
 data/transcripts/*
 data/videos/*
+data/uploads/*
 faiss_index
 .gradio
 
