@@ -75,6 +75,13 @@ jupyter notebook code.ipynb
     result = retrievalQA.invoke({'query': query})
     print(result['result'])  # LLM answer
 
+### Streamlit App
+Instead of using Jupyter, you can run the chatbot as a web app:
+
+```bash
+streamlit run app.py
+```
+
 ## 💡 Notes / Tips
 
     - For large video collections, consider using Whisper medium or large for better accuracy.
