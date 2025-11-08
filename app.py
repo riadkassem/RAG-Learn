@@ -11,8 +11,9 @@ from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import PromptTemplate
-from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_huggingface.llms import HuggingFacePipeline
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, pipeline
 
@@ -127,7 +128,7 @@ def build_or_update_vector_store(video_paths):
     return vector_store, embeddings
 
 # -----------------------------
-# Build HF text2text pipeline (safe, cached)
+# Build HF text2text pipeline (cached)
 # -----------------------------
 @st.cache_resource
 def build_hf_pipeline(model_id="google/flan-t5-base", device_idx=-1, max_new_tokens=256):
@@ -165,19 +166,22 @@ with st.spinner("Loading language model (may take a while on first run)..."):
 
 prompt_template = """Use the following pieces of context to answer the question at the end. Please follow the following rules:
 1. If you don't know the answer, just say "I don't know".
-2. If you find the answer, write the answer in a concise way with three sentences maximum.
-3. Always end your answer with a full stop.
+2. If you find the answer, write the answer in a concise way with five sentences maximum.
 
 {context}
 
-Question: {question}
+Question: {input}
 
 Helpful Answer:
 """
-PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+
+PROMPT = PromptTemplate(
+    template=prompt_template,
+    input_variables=["context", "input"]  # ✅ must be 'input' for create_retrieval_chain
+)
 
 # -----------------------------
-# Initialize (load FAISS if present)
+# Initialize FAISS if present
 # -----------------------------
 vector_store = None
 retriever = None
@@ -193,13 +197,6 @@ if any(os.scandir(FAISS_INDEX_DIR)):
         )
         vector_store = FAISS.load_local(FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
         retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k': 3})
-        retrievalQA = RetrievalQA.from_chain_type(
-            llm=hf,
-            chain_type='stuff',
-            retriever=retriever,
-            return_source_documents=True,
-            chain_type_kwargs={'prompt': PROMPT}
-        )
     except Exception as e:
         st.warning(f"Could not load existing FAISS index: {e}")
 
@@ -222,56 +219,59 @@ if st.button("Ask") and question:
     if uploaded_videos:
         for v in uploaded_videos:
             save_path = os.path.join(UPLOADS_DIR, v.name)
-            try:
-                with open(save_path, "wb") as f:
-                    f.write(v.getbuffer())
-                video_paths.append(save_path)
-            except Exception as e:
-                st.warning(f"Failed to save uploaded file {v.name}: {e}")
+            with open(save_path, "wb") as f:
+                f.write(v.getbuffer())
+            video_paths.append(save_path)
 
-    if video_paths:
         with st.spinner("Processing videos (audio extraction, transcription, embeddings)..."):
             vector_store, embeddings = build_or_update_vector_store(video_paths)
             if vector_store is None:
                 st.error("No audio/transcription could be produced from the uploaded videos.")
                 st.stop()
-            retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k': 3})
-            retrievalQA = RetrievalQA.from_chain_type(
-                llm=hf,
-                chain_type='stuff',
-                retriever=retriever,
-                return_source_documents=True,
-                chain_type_kwargs={'prompt': PROMPT}
-            )
 
-    if retrievalQA is None:
+    if vector_store is None:
         st.warning("Please upload at least one lecture video first (or ensure the FAISS index is present).")
+        st.stop()
+
+    retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k': 3})
+
+    # Create chains
+    qa_chain = create_stuff_documents_chain(
+        llm=hf,
+        prompt=PROMPT
+    )
+    retrievalQA = create_retrieval_chain(
+        retriever=retriever,
+        combine_docs_chain=qa_chain
+    )
+
+    # Run retrieval + generation
+    try:
+        with st.spinner("Running retrieval + generation..."):
+            result = retrievalQA.invoke({"input": question})  # ✅ 'input' key matches PromptTemplate
+    except Exception as e:
+        st.error(f"RetrievalQA failed: {e}")
+        traceback.print_exc()
+        st.stop()
+
+    # Extract answer and sources
+    raw_answer = result.get('answer', '')
+    answer = clean_answer(raw_answer)
+    source_docs = result.get('context', [])
+
+    if not answer.strip() or answer.strip().lower() == "i don't know":
+        st.info("I don't know.")
     else:
-        try:
-            with st.spinner("Running retrieval + generation..."):
-                result = retrievalQA.invoke({'query': question})
-        except Exception as e:
-            st.error(f"RetrievalQA failed: {e}")
-            traceback.print_exc()
-            st.stop()
+        st.subheader("Answer:")
+        st.write(answer)
 
-        raw_answer = result.get('result') if isinstance(result, dict) else (result or "")
-        answer = clean_answer(raw_answer)  # ✅ ensure full stop
-        source_docs = result.get('source_documents') if isinstance(result, dict) else None
-
-        if not answer or not answer.strip() or answer.strip().lower() == "i don't know":
-            st.info("I don't know.")
+        if source_docs:
+            st.subheader("Sources:")
+            for i, doc in enumerate(source_docs):
+                src = doc.metadata.get('source', 'unknown')
+                st.markdown(f"**Source #{i+1}:** {src}\n\n{doc.page_content}")
         else:
-            st.subheader("Answer:")
-            st.write(answer)
-
-            if source_docs:
-                st.subheader("Sources:")
-                for i, doc in enumerate(source_docs):
-                    src = doc.metadata.get('source', 'unknown')
-                    st.markdown(f"**Source #{i+1}:** {src}\n\n{doc.page_content}")
-            else:
-                st.info("No source documents available for this answer.")
+            st.info("No source documents available for this answer.")
 
 st.write("---")
 st.write("Notes:")
