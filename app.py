@@ -11,10 +11,9 @@ from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain.prompts import PromptTemplate
-from langchain.chains import RetrievalQA
+from langchain_core.prompts import PromptTemplate
+from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_huggingface.llms import HuggingFacePipeline
-
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, pipeline
 
 # -----------------------------
