@@ -1,16 +1,25 @@
+# Core
 streamlit==1.33.0
+numpy==1.24.6   # Compatible with Streamlit 1.33.0
+pandas==2.1.1
+scipy==1.11.2
+requests==2.32.5
+
+# PyTorch & audio
 torch==2.9.0
-torchaudio==2.1.0
+torchaudio==2.9.0  # Match torch version
+
+# ML/NLP
 transformers==4.42.0
 openai-whisper
-faiss-cpu==1.7.4
 sentence-transformers==2.2.2
+faiss-cpu==1.7.4
+
+# LangChain ecosystem
 langchain==0.1.0
 langchain-huggingface==0.0.7
 langchain-classic==0.0.9
 langchain-community==0.1.6
+
+# Hugging Face hub
 huggingface-hub==0.16.4
-scipy==1.11.2
-numpy==2.3.4
-pandas==2.1.1
-requests==2.32.5
