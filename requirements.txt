@@ -1,5 +1,4 @@
 streamlit
-ffmpeg
 numpy
 pandas
 scipy
