@@ -11,10 +11,9 @@ from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import PromptTemplate
-from langchain_huggingface.llms import HuggingFacePipeline
+from langchain_classic.chains import RetrievalQA
+from langchain_classic.prompts import PromptTemplate
+from langchain_huggingface import HuggingFacePipeline
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, pipeline
 
 # -----------------------------
@@ -34,13 +33,8 @@ os.makedirs(FAISS_INDEX_DIR, exist_ok=True)
 # -----------------------------
 # Device detection
 # -----------------------------
-if torch.cuda.is_available():
-    device_idx = 0
-    device_str = "cuda"
-else:
-    device_idx = -1
-    device_str = "cpu"
-
+device_str = "cuda" if torch.cuda.is_available() else "cpu"
+device_idx = 0 if torch.cuda.is_available() else -1
 st.sidebar.write(f"Device: {device_str}")
 
 # -----------------------------
@@ -86,6 +80,9 @@ def load_whisper_model():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return whisper.load_model("small", device=device)
 
+# -----------------------------
+# Build or update FAISS
+# -----------------------------
 def build_or_update_vector_store(video_paths):
     audio_files = []
     for video_path in video_paths:
@@ -100,7 +97,7 @@ def build_or_update_vector_store(video_paths):
     if not audio_files:
         return None, None
 
-    whisper_model = load_whisper_model()  # ✅ cached whisper
+    whisper_model = load_whisper_model()
     documents = transcribe_audio(audio_files, whisper_model)
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=700, chunk_overlap=50)
@@ -113,8 +110,7 @@ def build_or_update_vector_store(video_paths):
         encode_kwargs={'normalize_embeddings': True}
     )
 
-    index_exists = any(os.scandir(FAISS_INDEX_DIR))
-    if index_exists:
+    if any(os.scandir(FAISS_INDEX_DIR)):
         try:
             vector_store = FAISS.load_local(FAISS_INDEX_DIR, embeddings, allow_dangerous_deserialization=True)
             vector_store.add_documents(chunks)
@@ -128,14 +124,12 @@ def build_or_update_vector_store(video_paths):
     return vector_store, embeddings
 
 # -----------------------------
-# Build HF text2text pipeline (cached)
+# Build HF text2text pipeline
 # -----------------------------
 @st.cache_resource
 def build_hf_pipeline(model_id="google/flan-t5-base", device_idx=-1, max_new_tokens=256):
-    """Build and cache HF pipeline (higher max tokens for full answers)."""
     model = AutoModelForSeq2SeqLM.from_pretrained(model_id, device_map=None)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-
     pipe = pipeline(
         "text2text-generation",
         model=model,
@@ -146,10 +140,9 @@ def build_hf_pipeline(model_id="google/flan-t5-base", device_idx=-1, max_new_tok
     return HuggingFacePipeline(pipeline=pipe)
 
 # -----------------------------
-# Utility: Ensure answers end at a full stop
+# Ensure answers end at full stop
 # -----------------------------
 def clean_answer(text: str) -> str:
-    """Trim output so it ends at the last full sentence."""
     if not text:
         return ""
     for end in [".", "?", "!"]:
@@ -161,7 +154,7 @@ def clean_answer(text: str) -> str:
 # -----------------------------
 # Load LLM & Prompt
 # -----------------------------
-with st.spinner("Loading language model (may take a while on first run)..."):
+with st.spinner("Loading language model (may take a while)..."):
     hf = build_hf_pipeline(model_id="google/flan-t5-base", device_idx=device_idx, max_new_tokens=256)
 
 prompt_template = """Use the following pieces of context to answer the question at the end. Please follow the following rules:
@@ -170,18 +163,18 @@ prompt_template = """Use the following pieces of context to answer the question 
 
 {context}
 
-Question: {input}
+Question: {question}
 
 Helpful Answer:
 """
 
 PROMPT = PromptTemplate(
     template=prompt_template,
-    input_variables=["context", "input"]  # ✅ must be 'input' for create_retrieval_chain
+    input_variables=["context", "question"]
 )
 
 # -----------------------------
-# Initialize FAISS if present
+# Load FAISS index if exists
 # -----------------------------
 vector_store = None
 retriever = None
@@ -230,34 +223,31 @@ if st.button("Ask") and question:
                 st.stop()
 
     if vector_store is None:
-        st.warning("Please upload at least one lecture video first (or ensure the FAISS index is present).")
+        st.warning("Please upload at least one lecture video or ensure FAISS index exists.")
         st.stop()
 
     retriever = vector_store.as_retriever(search_type='similarity', search_kwargs={'k': 3})
 
-    # Create chains
-    qa_chain = create_stuff_documents_chain(
+    # Create RetrievalQA chain
+    retrievalQA = RetrievalQA.from_chain_type(
         llm=hf,
-        prompt=PROMPT
-    )
-    retrievalQA = create_retrieval_chain(
         retriever=retriever,
-        combine_docs_chain=qa_chain
+        chain_type="stuff",
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": PROMPT}
     )
 
     # Run retrieval + generation
     try:
         with st.spinner("Running retrieval + generation..."):
-            result = retrievalQA.invoke({"input": question})  # ✅ 'input' key matches PromptTemplate
+            result = retrievalQA({"query": question})
     except Exception as e:
         st.error(f"RetrievalQA failed: {e}")
         traceback.print_exc()
         st.stop()
 
-    # Extract answer and sources
-    raw_answer = result.get('answer', '')
-    answer = clean_answer(raw_answer)
-    source_docs = result.get('context', [])
+    answer = clean_answer(result.get("result", ""))
+    source_docs = result.get("source_documents", [])
 
     if not answer.strip() or answer.strip().lower() == "i don't know":
         st.info("I don't know.")
@@ -268,13 +258,13 @@ if st.button("Ask") and question:
         if source_docs:
             st.subheader("Sources:")
             for i, doc in enumerate(source_docs):
-                src = doc.metadata.get('source', 'unknown')
+                src = doc.metadata.get("source", "unknown")
                 st.markdown(f"**Source #{i+1}:** {src}\n\n{doc.page_content}")
         else:
             st.info("No source documents available for this answer.")
 
 st.write("---")
 st.write("Notes:")
-st.write("- The app will save uploads to `data/uploads/` and extract audio to `data/audio/`.")
-st.write("- FAISS index will live in the `faiss_index/` directory.")
-st.write("- If you have a GPU available, models will be placed on CUDA automatically.")
+st.write("- Uploads are saved to `data/uploads/` and audio extracted to `data/audio/`.")
+st.write("- FAISS index is stored in `faiss_index/`.")
+st.write("- GPU is automatically used if available.")
