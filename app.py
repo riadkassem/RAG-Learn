@@ -7,7 +7,7 @@ import torch
 import whisper
 import streamlit as st
 
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
@@ -104,7 +104,7 @@ def build_or_update_vector_store(video_paths):
     chunks = text_splitter.split_documents(documents)
 
     embed_device = "cuda" if torch.cuda.is_available() else "cpu"
-    embeddings = HuggingFaceBgeEmbeddings(
+    embeddings = HuggingFaceEmbeddings(
         model_name='sentence-transformers/all-MiniLM-L6-v2',
         model_kwargs={'device': embed_device},
         encode_kwargs={'normalize_embeddings': True}
@@ -183,7 +183,7 @@ retrievalQA = None
 if any(os.scandir(FAISS_INDEX_DIR)):
     try:
         embed_device = "cuda" if torch.cuda.is_available() else "cpu"
-        embeddings = HuggingFaceBgeEmbeddings(
+        embeddings = HuggingFaceEmbeddings(
             model_name='sentence-transformers/all-MiniLM-L6-v2',
             model_kwargs={'device': embed_device},
             encode_kwargs={'normalize_embeddings': True}
