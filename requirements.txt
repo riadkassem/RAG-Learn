@@ -1,5 +1,5 @@
 streamlit==1.33.0
-torch==2.1.0
+torch==2.9.0
 torchaudio==2.1.0
 transformers==4.42.0
 openai-whisper
