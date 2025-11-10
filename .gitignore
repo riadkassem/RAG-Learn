@@ -7,11 +7,9 @@ __pycache__/
 *.so
 
 ## Custom
-data/audio/*
-data/transcripts/*
-data/videos/*
-data/uploads/*
+data/*
 faiss_index
+models/*
 .gradio
 
 # Distribution / packaging
