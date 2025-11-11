@@ -16,3 +16,4 @@ langchain-community
 huggingface-hub
 ollama
 ffmpeg-python
+pypdf
